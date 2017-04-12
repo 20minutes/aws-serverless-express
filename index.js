@@ -41,7 +41,7 @@ function mapApiGatewayEventToHttpRequest(event, context, socketPath) {
     }
 }
 
-function forwardResponseToApiGateway(server, response, context) {
+function forwardResponseToApiGateway(server, response, context, callback) {
     let buf = []
 
     response
@@ -84,11 +84,11 @@ function forwardResponseToApiGateway(server, response, context) {
 
             const successResponse = {statusCode, body, headers, isBase64Encoded}
 
-            context.succeed(successResponse)
+            callback(null, successResponse)
         })
 }
 
-function forwardConnectionErrorResponseToApiGateway(server, error, context) {
+function forwardConnectionErrorResponseToApiGateway(server, error, context, callback) {
     console.error(error)
     const errorResponse = {
         statusCode: 502, // "DNS resolution, TCP level errors, or actual HTTP parse errors" - https://nodejs.org/api/http.html#http_http_request_options_callback
@@ -96,10 +96,10 @@ function forwardConnectionErrorResponseToApiGateway(server, error, context) {
         headers: {}
     }
 
-    context.succeed(errorResponse)
+    callback(null, errorResponse)
 }
 
-function forwardLibraryErrorResponseToApiGateway(server, error, context) {
+function forwardLibraryErrorResponseToApiGateway(server, error, context, callback) {
     console.error(error)
     const errorResponse = {
         statusCode: 500,
@@ -107,18 +107,18 @@ function forwardLibraryErrorResponseToApiGateway(server, error, context) {
         headers: {}
     }
 
-    context.succeed(errorResponse)
+    callback(null, errorResponse)
 }
 
-function forwardRequestToNodeServer(server, event, context) {
+function forwardRequestToNodeServer(server, event, context, callback) {
     const requestOptions = mapApiGatewayEventToHttpRequest(event, context, getSocketPath(server._socketPathSuffix))
-    const req = http.request(requestOptions, (response) => forwardResponseToApiGateway(server, response, context))
+    const req = http.request(requestOptions, (response) => forwardResponseToApiGateway(server, response, context, callback))
 
     if (event.body) {
         req.write(event.body)
     }
 
-    req.on('error', (error) => forwardConnectionErrorResponseToApiGateway(server, error, context))
+    req.on('error', (error) => forwardConnectionErrorResponseToApiGateway(server, error, context, callback))
     .end()
 }
 
@@ -154,22 +154,22 @@ exports.createServer = (requestListener, serverListenCallback, binaryTypes) => {
     return server
 }
 
-exports.proxy = (server, event, context) => {
+exports.proxy = (server, event, context, callback) => {
     try {
         if (server._isListening) {
-            forwardRequestToNodeServer(server, event, context)
+            forwardRequestToNodeServer(server, event, context, callback)
         } else {
             startServer(server)
             .on('listening', () => {
                 try {
-                    forwardRequestToNodeServer(server, event, context)
+                    forwardRequestToNodeServer(server, event, context, callback)
                 } catch(error) {
-                    forwardLibraryErrorResponseToApiGateway(server, error, context)
+                    forwardLibraryErrorResponseToApiGateway(server, error, context, callback)
                 }
             })
         }
     } catch (error) {
-        forwardLibraryErrorResponseToApiGateway(server, error, context)
+        forwardLibraryErrorResponseToApiGateway(server, error, context, callback)
     }
 }
 
